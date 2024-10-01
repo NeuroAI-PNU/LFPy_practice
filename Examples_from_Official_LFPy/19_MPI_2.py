@@ -75,7 +75,7 @@ if not os.path.isfile(join('FromModelDB', 'cells', 'cells', 'j4a.hoc')):
     localFile.write(u.read())
     localFile.close()
     #unzip:
-    myzip = zipfile.ZipFile('patdemo.zip', 'r')
+    myzip = zipfile.ZipFile('FromModelDB/patdemo.zip', 'r')
     myzip.extractall('FromModelDB/.')
     myzip.close()
 
@@ -351,5 +351,5 @@ if RANK == 0:
     ax.xaxis.set_ticks_position('bottom')
     ax.yaxis.set_ticks_position('left')
 
-    fig.savefig('10_MPI_2.pdf', dpi=300)
+    fig.savefig('19_MPI_2.pdf', dpi=300)
     plt.show()

@@ -62,7 +62,7 @@ if not os.path.isfile(join('FromModelDB', 'cells', 'cells', 'j4a.hoc')):
     localFile.write(u.read())
     localFile.close()
     #unzip:
-    myzip = zipfile.ZipFile('patdemo.zip', 'r')
+    myzip = zipfile.ZipFile('FromModelDB/patdemo.zip', 'r')
     myzip.extractall('FromModelDB/.')
     myzip.close()
 
