@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# brunel_alpha_nest.py
+# brunel_exp_multisynapse_nest.py
 #
 # This file is part of NEST.
 #
@@ -20,14 +20,18 @@
 # along with NEST.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-Random balanced network (alpha synapses) connected with NEST
-------------------------------------------------------------
+Random balanced network (exp synapses, multiple time constants)
+---------------------------------------------------------------
 
 This script simulates an excitatory and an inhibitory population on
 the basis of the network used in [1]_.
 
-In contrast to ``brunel-alpha-numpy.py``, this variant uses NEST's builtin
-connection routines to draw the random connections instead of NumPy.
+The example demonstrate the usage of the multisynapse neuron
+model. Each spike arriving at the neuron triggers an exponential
+PSP. The time constant associated with the PSP is defined in the
+receptor type array tau_syn of each neuron. The receptor types of all
+connections are uniformly distributed, resulting in uniformly
+distributed time constants of the PSPs.
 
 When connecting the network, customary synapse models are used, which
 allow for querying the number of created synapses. Using spike
@@ -42,47 +46,21 @@ References
        inhibitory spiking neurons. Journal of Computational Neuroscience 8,
        183-208.
 
+See Also
+~~~~~~~~
+
+:doc:`brunel_alpha_nest`
+
 """
 
 ###############################################################################
-# Import all necessary modules for simulation, analysis and plotting. Scipy
-# should be imported before nest.
+# Import all necessary modules for simulation, analysis and plotting.
 
 import time
 
 import matplotlib.pyplot as plt
 import nest
 import nest.raster_plot
-import numpy as np
-import scipy.special as sp
-
-###############################################################################
-# Definition of functions used in this example. First, define the `Lambert W`
-# function implemented in SLI. The second function computes the maximum of
-# the postsynaptic potential for a synaptic input current of unit amplitude
-# (1 pA) using the `Lambert W` function. Thus function will later be used to
-# calibrate the synaptic weights.
-
-
-def LambertWm1(x):
-    # Using scipy to mimic the gsl_sf_lambert_Wm1 function.
-    return sp.lambertw(x, k=-1 if x < 0 else 0).real
-
-
-def ComputePSPnorm(tauMem, CMem, tauSyn):
-    a = tauMem / tauSyn
-    b = 1.0 / tauSyn - 1.0 / tauMem
-
-    # time of maximum
-    t_max = 1.0 / b * (-LambertWm1(-np.exp(-1.0 / a) / a) - 1.0 / a)
-
-    # maximum of PSP for current of unit amplitude
-    return (
-        np.exp(1.0)
-        / (tauSyn * CMem * b)
-        * ((np.exp(-t_max / tauMem) - np.exp(-t_max / tauSyn)) / b - t_max * np.exp(-t_max / tauSyn))
-    )
-
 
 nest.ResetKernel()
 
@@ -91,8 +69,6 @@ nest.ResetKernel()
 # time of the network.
 
 startbuild = time.time()
-
-
 
 ###############################################################################
 # Assigning the simulation parameters to variables.
@@ -128,27 +104,26 @@ C_tot = int(CI + CE)  # total number of synapses per neuron
 
 ###############################################################################
 # Initialization of the parameters of the integrate and fire neuron and the
-# synapses. The parameters of the neuron are stored in a dictionary. The
-# synaptic currents are normalized such that the amplitude of the PSP is J.
+# synapses. The parameters of the neuron are stored in a dictionary.
 
-tauSyn = 0.5  # synaptic time constant in ms
 tauMem = 20.0  # time constant of membrane potential in ms
-CMem = 250.0  # capacitance of membrane in in pF
 theta = 20.0  # membrane threshold potential in mV
+J = 0.1  # postsynaptic amplitude in mV
+nr_ports = 100  # number of receptor types
+# Create array of synaptic time constants for each neuron,
+# ranging from 0.1 to 1.09 ms.
+tau_syn = [0.1 + 0.01 * i for i in range(nr_ports)]
 neuron_params = {
-    "C_m": CMem,
+    "C_m": 1.0,
     "tau_m": tauMem,
-    "tau_syn_ex": tauSyn,
-    "tau_syn_in": tauSyn,
     "t_ref": 2.0,
     "E_L": 0.0,
     "V_reset": 0.0,
     "V_m": 0.0,
     "V_th": theta,
+    "tau_syn": tau_syn,
 }
-J = 0.1  # postsynaptic amplitude in mV
-J_unit = ComputePSPnorm(tauMem, CMem, tauSyn)
-J_ex = J / J_unit  # amplitude of excitatory postsynaptic current
+J_ex = J  # amplitude of excitatory postsynaptic current
 J_in = -g * J_ex  # amplitude of inhibitory postsynaptic current
 
 ###############################################################################
@@ -157,11 +132,11 @@ J_in = -g * J_ex  # amplitude of inhibitory postsynaptic current
 # rate of the poisson generator which is multiplied by the in-degree CE and
 # converted to Hz by multiplication by 1000.
 
-nu_th = (theta * CMem) / (J_ex * CE * np.exp(1) * tauMem * tauSyn)
+nu_th = theta / (J * CE * tauMem)
 nu_ex = eta * nu_th
 p_rate = 1000.0 * nu_ex * CE
 
-################################################################################
+###############################################################################
 # Configuration of the simulation kernel by the previously defined time
 # resolution used in the simulation. Setting ``print_time`` to `True` prints the
 # already processed simulation time as well as its percentage of the total
@@ -171,6 +146,7 @@ nest.resolution = dt
 nest.print_time = True
 nest.overwrite_files = True
 nest.local_num_threads = 30
+
 print("Building network")
 
 ###############################################################################
@@ -180,20 +156,20 @@ print("Building network")
 # later be used to record excitatory and inhibitory spikes. Properties of the
 # nodes are specified via ``params``, which expects a dictionary.
 
-nodes_ex = nest.Create("iaf_psc_alpha", NE, params=neuron_params)
-nodes_in = nest.Create("iaf_psc_alpha", NI, params=neuron_params)
+nodes_ex = nest.Create("iaf_psc_exp_multisynapse", NE, params=neuron_params)
+nodes_in = nest.Create("iaf_psc_exp_multisynapse", NI, params=neuron_params)
 noise = nest.Create("poisson_generator", params={"rate": p_rate})
 espikes = nest.Create("spike_recorder")
 ispikes = nest.Create("spike_recorder")
 
-###############################################################################
+################################################################################
 # Configuration of the spike recorders recording excitatory and inhibitory
 # spikes by sending parameter dictionaries to ``set``. Setting the property
 # `record_to` to *"ascii"* ensures that the spikes will be recorded to a file,
 # whose name starts with the string assigned to the property `label`.
 
-espikes.set(label="data/brunel-py-ex", record_to="ascii")
-ispikes.set(label="data/brunel-py-in", record_to="ascii")
+#espikes.set(label="brunel-py-ex", record_to="ascii")
+#ispikes.set(label="brunel-py-in", record_to="ascii")
 
 print("Connecting devices")
 
@@ -208,16 +184,24 @@ print("Connecting devices")
 nest.CopyModel("static_synapse", "excitatory", {"weight": J_ex, "delay": delay})
 nest.CopyModel("static_synapse", "inhibitory", {"weight": J_in, "delay": delay})
 
-#################################################################################
+###################################################################################
 # Connecting the previously defined poisson generator to the excitatory and
 # inhibitory neurons using the excitatory synapse. Since the poisson
 # generator is connected to all neurons in the population the default rule
-# (``all_to_all``) of ``Connect`` is used. The synaptic properties are inserted
-# via ``syn_spec`` which expects a dictionary when defining multiple variables or
-# a string when simply using a pre-defined synapse.
+# (# ``all_to_all``) of ``Connect`` is used. The synaptic properties are
+# pre-defined # in a dictionary and inserted via ``syn_spec``. As synaptic model
+# the pre-defined synapses "excitatory" and "inhibitory" are chosen,
+# thus setting ``weight`` and ``delay``. The receptor type is drawn from a
+# distribution for each connection, which is specified in the synapse
+# properties by assigning a dictionary to the keyword ``receptor_type``,
+# which includes the specification of the distribution and the associated
+# parameter.
 
-nest.Connect(noise, nodes_ex, syn_spec="excitatory")
-nest.Connect(noise, nodes_in, syn_spec="excitatory")
+syn_params_ex = {"synapse_model": "excitatory", "receptor_type": nest.random.uniform_int(max=nr_ports - 1) + 1}
+syn_params_in = {"synapse_model": "inhibitory", "receptor_type": nest.random.uniform_int(max=nr_ports - 1) + 1}
+
+nest.Connect(noise, nodes_ex, syn_spec=syn_params_ex)
+nest.Connect(noise, nodes_in, syn_spec=syn_params_ex)
 
 ###############################################################################
 # Connecting the first ``N_rec`` nodes of the excitatory and inhibitory
@@ -233,26 +217,25 @@ print("Connecting network")
 print("Excitatory connections")
 
 ###############################################################################
-# Connecting the excitatory population to all neurons using the pre-defined
-# excitatory synapse. Beforehand, the connection parameter are defined in a
+# Connecting the excitatory population to all neurons while distribution the
+# ports. Here we use the previously defined parameter dictionary
+# ``syn_params_ex``. Beforehand, the connection parameter are defined in a
 # dictionary. Here we use the connection rule ``fixed_indegree``,
-# which requires the definition of the indegree. Since the synapse
-# specification is reduced to assigning the pre-defined excitatory synapse it
-# suffices to insert a string.
+# which requires the definition of the indegree.
 
 conn_params_ex = {"rule": "fixed_indegree", "indegree": CE}
-nest.Connect(nodes_ex, nodes_ex + nodes_in, conn_params_ex, "excitatory")
+nest.Connect(nodes_ex, nodes_ex + nodes_in, conn_params_ex, syn_params_ex)
 
 print("Inhibitory connections")
 
 ###############################################################################
-# Connecting the inhibitory population to all neurons using the pre-defined
-# inhibitory synapse. The connection parameter as well as the synapse
-# parameter are defined analogously to the connection from the excitatory
-# population defined above.
+# Connecting the inhibitory population to all neurons while distribution the
+# ports. Here we use the previously defined parameter dictionary
+# ``syn_params_in``.The connection parameter are defined analogously to the
+# connection from the excitatory population defined above.
 
 conn_params_in = {"rule": "fixed_indegree", "indegree": CI}
-nest.Connect(nodes_in, nodes_ex + nodes_in, conn_params_in, "inhibitory")
+nest.Connect(nodes_in, nodes_ex + nodes_in, conn_params_in, syn_params_in)
 
 ###############################################################################
 # Storage of the time point after the buildup of the network in a variable.
@@ -320,4 +303,4 @@ print(f"Simulation time   : {sim_time:.2f} s")
 # Plot a raster of the excitatory neurons and a histogram.
 
 nest.raster_plot.from_device(espikes, hist=True)
-plt.savefig("brunel-py-raster.png")
+plt.savefig("brunel-py-exp-multi-raster.png")
