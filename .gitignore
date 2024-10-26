@@ -169,3 +169,5 @@ FromModelDB/
 *.bak
 *.dir
 *.pkl
+*.gz
+*.eps
